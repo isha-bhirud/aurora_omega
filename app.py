@@ -1,13 +1,3 @@
-"""
-AURORA - Main Desktop Pygame Application
-Integrates all operational views:
-  1. Dashboard & Schedule
-  2. Manual Runway Assignment & Validation Engine
-  3. Artos 2D Radar Scope (Map 1 & Map 2)
-  4. Fleet & Infrastructure Management
-  5. Academic DBMS SQL Concept Demonstrator
-"""
-
 import pygame
 import sys
 from db import fetch_all, fetch_one, execute
