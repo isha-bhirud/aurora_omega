@@ -1,0 +1,7 @@
+# AURORA - Python Dependencies (Least Dependencies)
+# Standard desktop runtime requirements for Pygame + MySQL
+
+pygame>=2.5.0
+mysql-connector-python>=8.0.0
+PyMySQL>=1.1.0
+python-dotenv>=1.0.0

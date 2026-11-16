@@ -1,0 +1,421 @@
+import pypandoc, os, textwrap
+
+content = r"""
+AURORA — BUILD SPECIFICATION FOR ANTIGRAVITY
+Aircraft & Unified Runway Operations Records Archive
+
+PURPOSE
+Build a working, database-focused academic project named AURORA. It is a relational database application for managing aircraft, airlines, aircraft types, airports, runway infrastructure, flight records, predefined landing/takeoff schedules, and manually recorded runway assignments.
+
+IMPORTANT SCOPE LIMITS
+- This is primarily a MySQL database/DBMS concepts project with a usable frontend UI.
+- Do NOT implement dynamic runway allocation, optimization, AI scheduling, real-time air traffic control, or an algorithm that automatically assigns runways.
+- Landing and takeoff operations have predefined scheduled times. A user may manually assign a runway direction to an operation.
+- The application may VALIDATE a manually selected assignment against stored compatibility and restriction data and explain failures. Validation is not automatic allocation.
+- This is an academic demonstrator, not a certified aviation safety system. Do not claim operational/legal aviation validity.
+- Use MySQL 8.0+ (preferably MySQL 8.4 LTS if available). Use InnoDB, foreign keys, transactions, and appropriate constraints.
+- Before changing or creating the frontend, inspect the existing Artos GitHub repository/source folder supplied in the Antigravity workspace. Reuse its existing frontend/UI, components, assets, layout, and styling wherever practical. Do not discard the existing UI and replace it with a generic template without first auditing it. If the repository is not available in the workspace, ask for its URL or files instead of pretending to have inspected it.
+- Preserve useful existing code and document significant changes. Avoid unrelated rewrites.
+
+FIRST TASK: INSPECT THE EXISTING PROJECT
+1. Inspect the entire repository structure, README, package/build files, frontend source, assets, routing, styling system, and any existing database/backend code.
+2. Identify the current frontend framework and retain it unless there is a compelling compatibility issue.
+3. Report briefly what can be reused, what needs changing, and the proposed architecture before large changes.
+4. Then implement the application in the existing project structure.
+5. Do not hardcode credentials. Provide an .env.example and keep real secrets out of version control.
+
+SUGGESTED ARCHITECTURE
+- Frontend: reuse the framework and design already present in the Artos repository.
+- Backend: use a small REST API suitable for the existing stack (for example, Node.js + Express if compatible with the repository).
+- Database: MySQL 8.0+.
+- Use parameterized queries/prepared statements; never concatenate user input into SQL.
+- Keep database connection settings in environment variables.
+- Add SQL schema/migration scripts, seed data, API routes, and a README with exact setup/run instructions.
+- Do not introduce unnecessary frameworks or microservices.
+- If the existing repository is frontend-only, add the minimum backend required to connect it safely to MySQL.
+- Never connect the browser directly to MySQL or expose database credentials to frontend code.
+
+CORE DATA MODEL
+Use normalized relational tables. Table and column names may be adjusted consistently if needed, but preserve the relationships and business meaning.
+
+1. AIRLINE
+- airline_id: primary key
+- airline_name: required
+- iata_code: nullable unique code
+- icao_code: nullable unique code
+- country
+- callsign
+- operating_status
+
+2. AIRCRAFT_TYPE
+- type_id: primary key
+- manufacturer
+- model
+- variant
+- aircraft_category
+- wingspan
+- aircraft_length
+- max_takeoff_weight
+- max_landing_weight
+- passenger_capacity
+- cargo_capacity
+- min_runway_length (only if treated as a documented simplified compatibility rule)
+
+3. AIRCRAFT
+- aircraft_id: primary key
+- registration_number: unique and required
+- type_id: foreign key to AIRCRAFT_TYPE
+- owner_airline_id: foreign key to AIRLINE, nullable if unknown
+- operator_airline_id: foreign key to AIRLINE
+- manufacturing_date
+- aircraft_status (e.g. ACTIVE, MAINTENANCE, RETIRED)
+- notes
+
+4. AIRPORT
+- airport_id: primary key
+- airport_name
+- iata_code: nullable unique
+- icao_code: nullable unique
+- city
+- region/state
+- country
+- latitude
+- longitude
+- elevation
+- timezone (IANA timezone name, e.g. Asia/Kolkata)
+- operating_status
+
+5. RUNWAY
+- runway_id: primary key
+- airport_id: foreign key to AIRPORT
+- runway_designation (physical runway identifier such as 09/27)
+- runway_length
+- runway_width
+- surface_type
+- true_heading or other clearly defined heading representation
+- runway_status (OPEN, CLOSED, RESTRICTED, MAINTENANCE)
+- notes
+- unique constraint on (airport_id, runway_designation)
+
+6. RUNWAY_DIRECTION
+- direction_id: primary key
+- runway_id: foreign key to RUNWAY
+- designation (e.g. 09 or 27)
+- heading
+- landing_permitted
+- takeoff_permitted
+- ils_available
+- approach_category, nullable
+- unique constraint on (runway_id, designation)
+A physical runway normally has two directional designations. Represent each direction as a separate row and reference the direction, not only the physical runway, in an assignment.
+
+7. TAXIWAY
+- taxiway_id: primary key
+- airport_id: foreign key to AIRPORT
+- taxiway_name
+- surface_type
+- taxiway_status
+- unique constraint on (airport_id, taxiway_name)
+
+8. TERMINAL
+- terminal_id: primary key
+- airport_id: foreign key to AIRPORT
+- terminal_name
+- terminal_type
+- unique constraint on (airport_id, terminal_name)
+
+9. AIRCRAFT_STAND
+- stand_id: primary key
+- airport_id: foreign key to AIRPORT
+- terminal_id: nullable foreign key to TERMINAL
+- stand_code
+- max_aircraft_size or compatible aircraft category
+- stand_status
+- unique constraint on (airport_id, stand_code)
+
+10. FLIGHT
+- flight_id: primary key
+- flight_number
+- airline_id: foreign key to AIRLINE
+- aircraft_id: foreign key to AIRCRAFT
+- origin_airport_id: foreign key to AIRPORT
+- destination_airport_id: foreign key to AIRPORT
+- flight_type (PASSENGER, CARGO, FERRY, etc.)
+- flight_status (SCHEDULED, DELAYED, CANCELLED, COMPLETED)
+- optional service_date/flight instance information if needed
+Do not treat flight_number alone as globally unique; a flight number can recur on different dates.
+
+11. FLIGHT_OPERATION
+Represents one particular landing or takeoff at one airport. Keep it separate from FLIGHT.
+- operation_id: primary key
+- flight_id: foreign key to FLIGHT
+- airport_id: foreign key to AIRPORT
+- operation_type: LANDING or TAKEOFF
+- scheduled_datetime: required
+- estimated_datetime: nullable
+- actual_datetime: nullable
+- operation_status (SCHEDULED, DELAYED, CANCELLED, COMPLETED)
+- notes
+Do not store a single operation time on FLIGHT because a flight can have multiple operation records over time and landing/takeoff occur at different airports. Store timestamps consistently and display them in the airport's local timezone where appropriate.
+
+12. AIRCRAFT_RUNWAY_COMPATIBILITY
+A simplified, explicitly documented eligibility matrix, not a substitute for real aviation certification.
+- type_id: foreign key to AIRCRAFT_TYPE
+- runway_id: foreign key to RUNWAY
+- landing_eligible
+- takeoff_eligible
+- remarks
+- composite primary key (type_id, runway_id)
+Use this table to represent the project’s simplified aircraft-type/runway compatibility assumptions. Explain these are demonstration data, not authoritative operational rules.
+
+13. RUNWAY_RESTRICTION
+- restriction_id: primary key
+- runway_id: foreign key to RUNWAY
+- restriction_type
+- start_datetime
+- end_datetime
+- description
+- restriction_status
+Validate that end_datetime is after start_datetime. Restrictions may be scheduled closures, maintenance, or other explicitly modeled restrictions.
+
+14. RUNWAY_MAINTENANCE (optional; may be combined with RUNWAY_RESTRICTION to avoid duplicate concepts)
+- maintenance_id: primary key
+- runway_id: foreign key to RUNWAY
+- start_datetime
+- end_datetime
+- maintenance_type
+- maintenance_status
+Do not store the same closure redundantly in both this table and RUNWAY_RESTRICTION. Choose one consistent approach and explain it.
+
+15. AIRPORT_OPERATING_HOURS
+- hours_id: primary key
+- airport_id: foreign key to AIRPORT
+- day_of_week
+- opening_time
+- closing_time
+Document handling of overnight hours and closed days.
+
+16. RUNWAY_ASSIGNMENT
+Represents a user's manually recorded assignment for a particular operation.
+- assignment_id: primary key
+- operation_id: foreign key to FLIGHT_OPERATION and unique if the design allows only one current assignment per operation
+- direction_id: foreign key to RUNWAY_DIRECTION
+- assignment_datetime
+- assignment_status (PROPOSED, CONFIRMED, CANCELLED)
+- assigned_by or scheduler label, optional
+- remarks
+A runway assignment must use a direction belonging to the same airport as the operation. Implement this cross-table validation in backend/database logic; do not assume a normal foreign key alone guarantees it. Validate operation type against landing_permitted/takeoff_permitted and the compatibility table. Validate runway status and relevant restriction intervals for the scheduled time. Do not automatically select a different runway.
+
+17. AIRPORT_MAP
+- map_id: primary key
+- airport_id: foreign key to AIRPORT
+- map_name
+- map_type (AIRPORT_LAYOUT, RUNWAY, TAXIWAY, TERMINAL, etc.)
+- map_version
+- coordinate_reference_system
+- map_status
+- map_asset_url/path or descriptive metadata, as appropriate
+Do not pretend a map image exists if none is supplied.
+
+18. MAP_FEATURE
+- feature_id: primary key
+- map_id: foreign key to AIRPORT_MAP
+- feature_type
+- feature_name
+- latitude and longitude or geometry representation
+- optional linked runway/taxiway/terminal reference if properly modeled
+Avoid a generic polymorphic foreign key that cannot enforce referential integrity. If map features must reference several entity types, use subtype tables or a clear, documented design.
+
+OPTIONAL DBMS DEMONSTRATION TABLE
+19. ASSIGNMENT_AUDIT
+- audit_id: primary key
+- assignment_id
+- old_status
+- new_status
+- changed_at
+- changed_by
+Use a MySQL trigger to record status changes if implemented. Ensure audit behavior is tested.
+
+SCHEMA RULES
+- Use InnoDB and sensible data types (DECIMAL for dimensions/weights, DATE for dates, DATETIME or TIMESTAMP consistently for times, VARCHAR for identifiers).
+- Define all PKs, FKs, NOT NULL, UNIQUE, CHECK constraints supported by the chosen MySQL version, and indexes intentionally.
+- Use ON DELETE/UPDATE actions deliberately. Avoid cascading deletes that could erase flight history.
+- Enforce positive runway length/width and valid enum-like values through CHECK constraints or reference tables.
+- Use nullable unique airport codes if codes are unknown; confirm MySQL's NULL behavior.
+- Normalize the schema and document important functional dependencies. Avoid duplicating manufacturer/model in AIRCRAFT when they belong in AIRCRAFT_TYPE.
+- Do not store counts such as number_of_runways if they can be derived from RUNWAY.
+- Keep actual flight timing, schedule timing, aircraft identity, and runway assignment separate.
+- Avoid storing computed eligibility or availability as permanent facts if it can become stale; calculate validation from current runway, compatibility, restriction, and operation data.
+- Use migrations or versioned SQL scripts so the database can be recreated consistently.
+
+REQUIRED FRONTEND PAGES
+Reuse and adapt the existing Artos frontend wherever possible. Maintain a coherent visual style and responsive layout. The interface should be a working CRUD/admin dashboard, not a static mockup.
+
+1. Dashboard
+- Summary cards: aircraft count, active aircraft, airports, runways, today's scheduled operations, unassigned operations.
+- Upcoming landing/takeoff schedule.
+- Recent assignment activity if audit history is implemented.
+- Counts must come from database queries, not hardcoded constants.
+
+2. Aircraft
+- List/search/filter aircraft.
+- View details including registration, type, operator, owner, status, and capacity.
+- Create, edit, and retire/deactivate records.
+- Validate registration uniqueness and required references.
+
+3. Aircraft Types
+- Manage manufacturer, model, variant, category, dimensions, weights, and capacity.
+- Show linked aircraft and runway compatibility.
+
+4. Airlines
+- List, search, create, edit, and view airline records.
+
+5. Airports and Infrastructure
+- Airport list and details.
+- Runway and runway-direction management.
+- Taxiways, terminals, stands, runway restrictions and operating hours.
+- Show runway status and restrictions clearly.
+
+6. Flights
+- Create and manage flight records with airline, aircraft, origin, destination, and status.
+- Do not confuse a recurring flight number with an individual flight instance.
+
+7. Operations / Schedule
+- A table/calendar-style view of predefined landing and takeoff operations.
+- Filter by airport, date, operation type, status, flight number and assigned/unassigned status.
+- Create/edit scheduled operations.
+- Show scheduled, estimated and actual times separately.
+- Do not generate schedules automatically.
+
+8. Runway Assignment
+- Let the user select an existing operation and manually choose a runway direction at the same airport.
+- On user submission, validate:
+  a. runway direction belongs to the operation's airport;
+  b. landing/takeoff is permitted for that direction;
+  c. aircraft type/runway compatibility exists and is eligible for the operation type;
+  d. runway is open and no applicable restriction/maintenance period blocks the scheduled time;
+  e. any other explicitly implemented project rules.
+- Show a clear pass/fail result with a specific reason.
+- If invalid, explain the issue and let the user choose another direction manually. Never auto-allocate.
+- Prevent duplicate current assignments per operation.
+- Support changing/cancelling an assignment and record audit history if available.
+
+9. Maps
+- List maps by airport and map type.
+- Display provided map images or simple stored feature coordinates when available.
+- If no map assets exist, show a useful placeholder and allow metadata/feature management; do not fabricate real airport maps.
+- A map display is a visualization of stored data, not a routing or allocation engine.
+
+10. Reports / SQL Concepts
+Provide a page or clearly documented SQL examples for DBMS course demonstrations:
+- aircraft by operator/type/status;
+- flights between airports;
+- scheduled arrivals and departures in a time range;
+- unassigned operations;
+- runway assignments with operation/aircraft/airport details;
+- compatible runways for a selected aircraft type;
+- runways under restriction at a selected time;
+- operation counts grouped by airport/runway/direction;
+- airports without runways;
+- aircraft types with no compatible runway entries.
+Use joins, projections, selections, subqueries, aggregation, GROUP BY/HAVING, UNION/INTERSECT/EXCEPT where supported. MySQL does not support INTERSECT/EXCEPT in all versions historically; verify the target version and use equivalent anti-joins/UNION logic when necessary. Explain the SQL concept each query demonstrates.
+
+DATABASE COURSE CONCEPTS TO IMPLEMENT/DEMONSTRATE
+A. ER model: provide ER diagram and explain cardinalities/optional relationships.
+B. Relational model: final relation schema with PK/FK/unique constraints.
+C. Selection and projection: WHERE and SELECT column lists; use DISTINCT to demonstrate duplicate elimination.
+D. Joins: inner, left, self join where meaningful, and multi-table joins.
+E. Set operations: UNION; if supported by selected MySQL version, INTERSECT/EXCEPT, otherwise demonstrate equivalent SQL and explain the difference.
+F. Nested and correlated subqueries: NOT EXISTS, IN, comparison with group averages.
+G. Aggregation: COUNT, AVG, MIN, MAX, GROUP BY, HAVING.
+H. DDL/DML: CREATE, ALTER, INSERT, UPDATE, DELETE with safe sample data.
+I. Constraints: PK, FK, UNIQUE, NOT NULL, CHECK and referential actions.
+J. Normalization: document functional dependencies, candidate keys, and a worked 1NF/2NF/3NF/BCNF example. Do not claim BCNF merely because tables look normalized; show dependencies and reasoning. Keep artificial teaching examples separate from production schema if needed.
+K. Views: create views for scheduled arrivals/departures and runway assignment summaries.
+L. Indexing: create useful indexes and explain the access paths they support.
+M. Query optimization: use EXPLAIN and benchmark representative queries before/after selected indexes with realistic seed volume. Never claim speedup without measurements.
+N. Transactions/ACID: demonstrate assignment insert/update and rollback.
+O. Concurrency: optionally demonstrate two sessions attempting conflicting overlapping runway reservations. This is an experiment, not dynamic allocation.
+P. Stored routines: implement a function/procedure for assignment validation only if it fits the chosen architecture.
+Q. Triggers: optional assignment audit trigger; don't duplicate validation across many layers without a clear design.
+R. Authorization: define database roles or application roles for admin, scheduler, viewer. Never expose DB credentials in frontend.
+S. Recovery: document backup/restore procedure; optional test restore.
+T. Spatial data: optional extension only if useful. Basic MySQL spatial types may be used, but do not add a GIS dependency without need.
+
+API / BACKEND REQUIREMENTS
+- Use REST endpoints or the existing project's established API pattern.
+- Implement CRUD endpoints for core entities and endpoints for schedules, assignment validation, assignment changes, dashboard metrics, and reports.
+- Validate request payloads server-side; use parameterized SQL.
+- Return meaningful HTTP status codes and readable validation errors.
+- Handle database errors gracefully; never expose passwords, stack traces, or raw SQL to the UI.
+- Use transactions for multi-step writes.
+- Validate that IDs exist and relationships are valid before writes.
+- Add pagination for large lists and allow filtering/searching.
+- Avoid creating an endpoint that automatically allocates runways.
+
+SEED DATA
+Create realistic but clearly fictional/demo data for testing:
+- at least 3 airlines;
+- at least 5 aircraft types;
+- at least 10 aircraft;
+- at least 2 airports;
+- at least 3 runways per airport where sensible, each with two direction rows;
+- taxiways, terminals, stands, maps/feature metadata;
+- at least 20 flight records and multiple dated landing/takeoff operations;
+- compatibility records with both eligible and ineligible examples;
+- runway restrictions/maintenance windows;
+- both assigned and unassigned operations;
+- include invalid scenarios for testing validation (wrong airport, incompatible type, closed runway, restriction overlap, wrong operation direction).
+Use fictional identifiers and clearly label demo data. Do not imply that fictional compatibility rules are real-world aviation guidance.
+
+TESTING REQUIREMENTS
+- Unit/integration tests for core CRUD and validation.
+- Test duplicate registration, missing foreign keys, invalid dimensions, invalid operation types, wrong-airport runway assignment, incompatible aircraft type, closed runway, restriction overlap, and duplicate assignment.
+- Test valid manual assignment and assignment cancellation/update.
+- Test transaction rollback.
+- Test dashboard counts against actual seed rows.
+- Test empty states, loading states, API errors, and form validation.
+- Ensure seed scripts can run repeatedly or clearly document that they reset demo data.
+- Do not claim tests pass unless they have been run and passed.
+
+DELIVERABLES
+- Updated/reused frontend source.
+- Backend source, if required by current architecture.
+- MySQL schema/migration files.
+- Seed-data script.
+- .env.example with placeholder values only.
+- README with prerequisites, MySQL database creation, environment setup, migrations, seed command, application start commands, and troubleshooting.
+- ER diagram (Mermaid or another editable text format, plus an image if supported).
+- Relational schema document with PK/FK annotations.
+- SQL examples for the DBMS concepts listed above.
+- Short test report listing tests actually run and their results.
+- Clear list of implemented features and known limitations.
+
+ACCEPTANCE CRITERIA
+1. App starts locally using documented instructions.
+2. Frontend is adapted from the Artos repository when source is provided; existing useful UI assets/components are preserved.
+3. Frontend reads/writes persistent MySQL-backed data through the backend.
+4. CRUD works for core entities.
+5. Schedule shows predefined operations, not generated operations.
+6. Runway assignments are made manually and are validated against documented rules.
+7. Invalid assignments are rejected with understandable reasons.
+8. Dashboard/report numbers are derived from database queries.
+9. Schema is normalized, referentially consistent, and reproducible.
+10. SQL concept demonstrations are documented and executable.
+11. No credentials are committed, no fake functionality is presented as complete, and no unsupported aviation safety claims are made.
+
+IMPLEMENTATION WORKFLOW FOR ANTIGRAVITY
+Phase 1: Inspect repo, identify frontend stack/assets, summarize findings.
+Phase 2: Propose final architecture and schema; resolve design choices such as whether maintenance is a restriction subtype and how timestamps are stored.
+Phase 3: Implement MySQL schema/migrations and seed data.
+Phase 4: Implement backend/API using parameterized SQL and validation.
+Phase 5: Adapt existing Artos UI to AURORA and connect it to real API data.
+Phase 6: Add reports and DBMS concept demonstrations.
+Phase 7: Test, fix issues, and write setup/documentation.
+Work in small, verifiable increments. Do not merely generate mock screens or a static prototype. Do not replace existing UI before inspecting it. Do not implement automatic runway allocation.
+""".strip()
+
+out_path = "/mnt/data/AURORA_Antigravity_Build_Spec.txt"
+pypandoc.convert_text(content, 'plain', format='md', outputfile=out_path, extra_args=['--standalone'])
+print(f"Created: {out_path}")
+print(f"Size: {os.path.getsize(out_path):,} bytes")
